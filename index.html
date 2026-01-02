@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Économies Clopes</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#4CAF50">
+<style>
+  body { font-family: Arial, sans-serif; background: #f0f0f0; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+  h1 { font-size: 2rem; margin-bottom: 10px; }
+  .compteur { font-size: 3rem; margin: 20px 0; }
+  .indicateurs p, #contenuStats p { margin: 4px 0; font-size: 1rem; }
+  button { padding: 10px 20px; font-size: 1.2rem; margin: 5px; cursor: pointer; }
+  input, select { font-size: 1rem; padding: 5px; margin: 5px; }
+  .section { background: #fff; padding: 15px; margin: 10px 0; border-radius: 10px; width: 100%; max-width: 400px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);}
+  .achat-list { max-height: 120px; overflow-y: auto; margin-top:10px; }
+  .achat-item { display: flex; justify-content: space-between; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  th, td { border: 1px solid #ccc; padding: 5px; text-align: center; font-size: 0.9rem; }
+  th { background-color: #eee; }
+</style>
+</head>
+<body>
+
+<h1>Économies Clopes</h1>
+
+<!-- Onglets -->
+<div class="section">
+  <button id="tabCompteur">Compteur</button>
+  <button id="tabStats">Stats</button>
+</div>
+
+<!-- Contenu Compteur -->
+<div id="contenuCompteur">
+  <div class="compteur" id="compteur">0.0000 €</div>
+  <div class="indicateurs">
+    <p id="econSec">Économie/sec : 0.0000 €/sec</p>
+    <p id="consoPonderee">Consommation réelle pondérée : 0.0</p>
+    <p id="projection">Projection : Semaine 0.0000 €, Mois 0.0000 €, Année 0.0000 €</p>
+  </div>
+
+  <div class="section">
+    <h2>Déclarer une cigarette</h2>
+    <select id="refSelect"></select>
+    <button id="fumeBtn">J'ai fumé</button>
+  </div>
+
+  <div class="section">
+    <h2>Ajouter un achat</h2>
+    <input type="text" id="achatNom" placeholder="Nom clope / cigarillo">
+    <input type="number" id="achatPrixTotal" placeholder="Prix total (€)" step="0.01">
+    <input type="number" id="achatQuantite" placeholder="Nombre d'unités" step="1">
+    <button id="ajoutAchatBtn">Ajouter Achat</button>
+    <div class="achat-list" id="achatList"></div>
+  </div>
+
+  <div class="section">
+    <h2>Paramètres</h2>
+    <input type="number" id="consoRef" placeholder="Conso journalière référence" step="1">
+    <button id="saveParamsBtn">Enregistrer</button>
+  </div>
+</div>
+
+<!-- Contenu Stats -->
+<div id="contenuStats" style="display:none;">
+  <h2>Statistiques</h2>
+  <p id="totalCig">Cigarettes totales déclarées : 0</p>
+  <p id="coutTotal">Coût total consommation : 0.0000 €</p>
+  <p id="moyenneJour">Moyenne journalière : 0.0</p>
+  <p id="economieManquee">Économie perdue : 0.0000 €</p>
+  <p id="tempsCouv">Temps pour couvrir 1 clope : 0:00:00</p>
+  <p id="tempsOpti">Temps pour couvrir 2 clopes : 0:00:00</p>
+
+  <h3>Historique récent</h3>
+  <table id="historiqueTable">
+    <thead>
+      <tr>
+        <th>Date & Heure</th>
+        <th>Nom cigarette</th>
+        <th>Prix (€)</th>
+        <th>Notation</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script>
+// ================= VARIABLES =================
+let compteur = parseFloat(localStorage.getItem('compteur')) || 0;
+let references = JSON.parse(localStorage.getItem('references')) || [];
+let consommationRef = parseFloat(localStorage.getItem('consommationRef')) || 20;
+let timestampLast = parseInt(localStorage.getItem('timestampLast')) || Date.now();
+let historiqueConso = JSON.parse(localStorage.getItem('historiqueConso')) || [];
+
+// ================= UTILITAIRES =================
+function saveState(){
+  localStorage.setItem('compteur', compteur.toFixed(4));
+  localStorage.setItem('references', JSON.stringify(references));
+  localStorage.setItem('consommationRef', consommationRef);
+  localStorage.setItem('timestampLast', timestampLast);
+  localStorage.setItem('historiqueConso', JSON.stringify(historiqueConso));
+}
+function prixUnitaireMoyen() {
+  if(references.length === 0) return 0.65;
+  let totalPrix = 0, totalQty = 0;
+  references.forEach(r => { totalPrix += r.prixTotal; totalQty += r.quantite; });
+  return totalPrix / totalQty;
+}
+function formatHeure(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  return `${h}h ${m}m ${s}s`;
+}
+
+// ================= SELECT & ACHATS =================
+function updateRefSelect(){
+  const select = document.getElementById('refSelect');
+  select.innerHTML = '';
+  references.forEach((r,i) => { const option = document.createElement('option'); option.value = i; option.textContent = `${r.nom} - ${r.prixUnitaire.toFixed(4)} €`; select.appendChild(option); });
+}
+function updateAchatList(){
+  const list = document.getElementById('achatList'); list.innerHTML = '';
+  references.forEach((r,i)=>{ const div = document.createElement('div'); div.className='achat-item'; div.innerHTML=`<span>${r.nom} - ${r.prixUnitaire.toFixed(4)} €</span>`; list.appendChild(div); });
+}
+document.getElementById('ajoutAchatBtn').addEventListener('click', ()=>{
+  const nom=document.getElementById('achatNom').value.trim();
+  const prixTotal=parseFloat(document.getElementById('achatPrixTotal').value);
+  const quantite=parseInt(document.getElementById('achatQuantite').value);
+  if(!nom||!prixTotal||!quantite)return alert('Remplis tous les champs');
+  const prixUnitaire=prixTotal/quantite;
+  references.push({nom, prixTotal, quantite, prixUnitaire});
+  saveState(); updateRefSelect(); updateAchatList();
+  document.getElementById('achatNom').value=''; document.getElementById('achatPrixTotal').value=''; document.getElementById('achatQuantite').value='';
+});
+
+// ================= CIGARETTE =================
+document.getElementById('fumeBtn').addEventListener('click', ()=>{
+  const sel=document.getElementById('refSelect');
+  if(sel.value==='')return alert('Ajoute une référence avant');
+  const refIndex=parseInt(sel.value);
+  const ref=references[refIndex];
+  compteur -= ref.prixUnitaire; // baisse immédiate
+  timestampLast = Date.now();
+  historiqueConso.push({date: timestampLast, nb:1, refIndex});
+  saveState();
+});
+
+// ================= PARAMETRES =================
+document.getElementById('saveParamsBtn').addEventListener('click', ()=>{
+  const val=parseFloat(document.getElementById('consoRef').value);
+  if(val<=0)return alert('Valeur invalide');
+  consommationRef=val; saveState(); document.getElementById('consoRef').value='';
+});
+
+// ================= CONSO PONDEREE =================
+function calculConsoPonderee(){
+  if(historiqueConso.length===0)return 0;
+  const totalConso = historiqueConso.reduce((sum,c)=>sum+c.nb,0);
+  return Math.ceil((totalConso/7)*10)/10;
+}
+
+// ================= COMPTEUR CONTINU =================
+function updateCompteurEtIndicateurs(){
+  const now=Date.now();
+  const secondesEcoulees=(now-timestampLast)/1000;
+  const econSec = prixUnitaireMoyen()*consommationRef/86400;
+  compteur += econSec*secondesEcoulees;
+  timestampLast=now;
+  const consoPonderee=calculConsoPonderee();
+  document.getElementById('compteur').textContent=compteur.toFixed(4)+' €';
+  document.getElementById('econSec').textContent='Économie/sec : '+econSec.toFixed(4)+' €/sec';
+  document.getElementById('consoPonderee').textContent='Consommation réelle pondérée : '+consoPonderee;
+  document.getElementById('projection').textContent='Projection : Semaine '+(econSec*60*60*24*7).toFixed(4)+' €, Mois '+(econSec*60*60*24*30).toFixed(4)+' €, Année '+(econSec*60*60*24*365).toFixed(4)+' €';
+  saveState();
+  requestAnimationFrame(updateCompteurEtIndicateurs);
+}
+
+// ================= STATS =================
+function updateStats(){
+  const tbody=document.getElementById('historiqueTable').querySelector('tbody');
+  tbody.innerHTML='';
+  let totalCig=0, coutTotal=0;
+  let prixRef=references[0]?references[0].prixUnitaire:0;
+  const econSec=prixUnitaireMoyen()*consommationRef/86400;
+  const t1=prixRef/econSec, t2=2*prixRef/econSec, mid=(t1+t2)/2;
+  let lastTime = historiqueConso.length>0?historiqueConso[0].date:Date.now();
+  historiqueConso.forEach(c=>{
+    const ref=references[c.refIndex];
+    const prix=ref?ref.prixUnitaire:0;
+    totalCig+=c.nb; coutTotal+=c.nb*prix;
+    const deltaSec=(c.date-lastTime)/1000; lastTime=c.date;
+    let note='';
+    if(deltaSec<=t1)note='C';
+    else if(deltaSec<=mid)note='B';
+    else if(deltaSec<=t2)note='B';
+    else note='A';
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${new Date(c.date).toLocaleString()}</td><td>${ref?ref.nom:'-'}</td><td>${prix.toFixed(4)}</td><td>${note}</td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('totalCig').textContent='Cigarettes totales déclarées : '+totalCig;
+  document.getElementById('coutTotal').textContent='Coût total consommation : '+coutTotal.toFixed(4)+' €';
+  const today=new Date(), start7=today.getTime()-7*24*60*60*1000;
+  const total7j=historiqueConso.filter(c=>c.date>=start7).reduce((sum,c)=>sum+c.nb,0);
+  document.getElementById('moyenneJour').textContent='Moyenne journalière : '+(total7j/7).toFixed(1);
+  document.getElementById('economieManquee').textContent='Économie perdue : '+coutTotal.toFixed(4)+' €';
+  document.getElementById('tempsCouv').textContent='Temps pour couvrir 1 clope : '+formatHeure(t1);
+  document.getElementById('tempsOpti').textContent='Temps pour couvrir 2 clopes : '+formatHeure(t2);
+}
+
+// ================= ONGLETS =================
+document.getElementById('tabCompteur').addEventListener('click', ()=>{
+  document.getElementById('contenuCompteur').style.display='block';
+  document.getElementById('contenuStats').style.display='none';
+});
+document.getElementById('tabStats').addEventListener('click', ()=>{
+  document.getElementById('contenuCompteur').style.display='none';
+  document.getElementById('contenuStats').style.display='block';
+  updateStats();
+});
+
+// ================= SERVICE WORKER =================
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('service-worker.js')
+      .then(reg=>console.log('Service Worker enregistré.',reg))
+      .catch(err=>console.log('Erreur Service Worker :',err));
+  });
+}
+
+// ================= INIT =================
+updateRefSelect(); updateAchatList(); updateCompteurEtIndicateurs();
+</script>
+</body>
+</html>
